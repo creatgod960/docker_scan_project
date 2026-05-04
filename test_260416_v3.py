@@ -26,7 +26,7 @@ import requests # API 통신용
 
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 
-# [명세서 반영 데이터 구조] - 필터링 테이블(PDF)의 항목들을 반영
+# [명세서 반영 데이터 구조] - 필터링 테이블(PDF)의 항목들을 반영 ㅇㅇㅇ
 # 실제 환경에서는 API를 통해 DB에서 이 데이터를 가져오게 됩니다.
 MOCK_ANALYSIS_RESULT = {
     "Critical": [
