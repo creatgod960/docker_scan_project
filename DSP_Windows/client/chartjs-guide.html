@@ -1,0 +1,439 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>DSP Chart.js 연동 가이드</title>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+    h2 { border-bottom: 2px solid #333; padding-bottom: 8px; }
+    .chart-box { display: flex; gap: 40px; margin: 20px 0; }
+    canvas { max-width: 300px; max-height: 300px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+    th { background: #f4f4f4; }
+    .kev-badge { background: #dc2626; color: white; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .sev-critical { color: #dc2626; font-weight: bold; }
+    .sev-high     { color: #ea580c; font-weight: bold; }
+    .sev-medium   { color: #ca8a04; }
+    .sev-low      { color: #16a34a; }
+    pre { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<h1>🐋 DSP — Chart.js 연동 가이드</h1>
+<p>이 파일을 브라우저에서 열고 콘솔을 보면 실제 동작 방식을 확인할 수 있습니다.</p>
+
+<!-- ───────────────────────────────────────────────
+     1. API 호출 방법
+─────────────────────────────────────────────── -->
+<h2>1. API 호출 — fetch 기본 패턴</h2>
+<pre>
+const API = 'http://localhost:3000';  // 백엔드 주소
+
+// ① 파일 업로드
+async function uploadImage(file) {
+  const form = new FormData();
+  form.append('image', file);          // input[type=file].files[0]
+
+  const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
+  const data = await res.json();
+  return data.jobId;                   // 이후 모든 요청에 사용
+}
+
+// ② 스캔 요청
+async function startScan(jobId, tool = 'both') {
+  const res = await fetch(`${API}/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jobId, tool }),  // tool: 'trivy' | 'grype' | 'both'
+  });
+  return res.json();
+}
+
+// ③ 결과 조회 (폴링 — 1초마다 status 확인)
+async function pollResult(jobId, onDone) {
+  const timer = setInterval(async () => {
+    const res  = await fetch(`${API}/scan/${jobId}`);
+    const data = await res.json();
+
+    if (data.status === 'done') {
+      clearInterval(timer);
+      onDone(data);          // 완료 시 data를 차트에 넘김
+    } else if (data.status === 'failed') {
+      clearInterval(timer);
+      console.error('스캔 실패:', data);
+    }
+  }, 2000);
+}
+
+// ④ 잡 목록 (최근 20개)
+async function listJobs() {
+  const res = await fetch(`${API}/scan?limit=20`);
+  return res.json();
+}
+</pre>
+
+<!-- ───────────────────────────────────────────────
+     2. API 응답 구조
+─────────────────────────────────────────────── -->
+<h2>2. GET /scan/:jobId 응답 구조</h2>
+<pre>
+{
+  "jobId":     "550e8400-...",
+  "status":    "done",            // queued | running | done | failed
+  "tool":      "both",
+
+  "trivy": {
+    "total":   142,
+    "results": [
+      {
+        "id": 1,
+        "vulnerability_id":  "CVE-2024-1234",
+        "pkg_name":          "nginx",
+        "target_type":       "ubuntu",        // OS 패키지 종류
+        "installed_version": "1.18.0",
+        "fixed_version":     "1.18.1",
+        "severity":          "CRITICAL",      // CRITICAL|HIGH|MEDIUM|LOW|UNKNOWN
+        "cvss_v3_score":     9.8,
+        "primary_url":       "https://nvd.nist.gov/..."
+      }
+      // ... 나머지 취약점
+    ]
+  },
+
+  "grype": {
+    "total":   98,
+    "results": [
+      {
+        "id": 1,
+        "vulnerability_id":  "CVE-2024-5678",
+        "pkg_name":          "openssl",
+        "pkg_type":          "deb",           // deb|rpm|apk|npm|pip 등
+        "installed_version": "3.0.0",
+        "severity":          "HIGH",
+        "epss_score":        0.94321,         // 30일 내 악용 확률 (0~1)
+        "epss_percentile":   0.99,
+        "risk_score":        8.7,             // 복합 위험도 (0~10)
+        "kev_included":      true,            // CISA KEV 등재 여부
+        "fix_versions":      "3.0.2",
+        "data_source":       "https://..."
+      }
+    ]
+  },
+
+  "filtered": {
+    "application": [...],   // 라이브러리 취약점 (npm/pip/gem 등) — Trivy 결과
+    "grypeOs":     [...],   // OS 취약점 (deb/rpm/apk 등) — Grype 결과
+    "security":    [        // 시크릿 탐지 — Trivy
+      {
+        "rule_id":     "private-key",
+        "category":    "AsymmetricPrivateKey",
+        "severity":    "CRITICAL",
+        "target":      "/etc/ssl/private/key.pem",
+        "match_masked": "-----BEGIN RSA P***",
+        "start_line":  1,
+        "end_line":    27
+      }
+    ]
+  },
+
+  "logs": [
+    { "level": "info", "message": "스캔 시작 (tool: both)", "created_at": "..." },
+    { "level": "info", "message": "Trivy 취약점 저장 완료 (총 142건)", "created_at": "..." }
+  ]
+}
+</pre>
+
+<!-- ───────────────────────────────────────────────
+     3. 도넛 그래프 (심각도별)
+─────────────────────────────────────────────── -->
+<h2>3. 심각도 도넛 그래프 (Trivy 기준)</h2>
+
+<div class="chart-box">
+  <div>
+    <h3>Trivy</h3>
+    <canvas id="trivyDonut"></canvas>
+  </div>
+  <div>
+    <h3>Grype</h3>
+    <canvas id="grypeDonut"></canvas>
+  </div>
+</div>
+
+<pre>
+// ── 심각도 집계 함수 ──────────────────────────────────
+function countSeverity(results, severityKey = 'severity') {
+  const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+  results.forEach(v => {
+    const sev = (v[severityKey] || 'UNKNOWN').toUpperCase();
+    // Grype는 'Critical'(대문자) 형태로 오므로 toUpperCase() 처리
+    const key = counts.hasOwnProperty(sev) ? sev : 'UNKNOWN';
+    counts[key]++;
+  });
+  return counts;
+}
+
+// ── Chart.js 도넛 생성 ────────────────────────────────
+function createDonut(canvasId, counts) {
+  const colors = {
+    CRITICAL: '#dc2626',
+    HIGH:     '#ea580c',
+    MEDIUM:   '#ca8a04',
+    LOW:      '#16a34a',
+    UNKNOWN:  '#6b7280',
+  };
+
+  new Chart(document.getElementById(canvasId), {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(counts),
+      datasets: [{
+        data:            Object.values(counts),
+        backgroundColor: Object.keys(counts).map(k => colors[k]),
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      cutout: '65%',
+      plugins: {
+        legend: { position: 'right' },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.raw}건`,
+          },
+        },
+      },
+    },
+  });
+}
+
+// ── 사용 예 ────────────────────────────────────────────
+// fetch 결과(data)를 받은 후:
+const trivyCounts = countSeverity(data.trivy.results);
+createDonut('trivyDonut', trivyCounts);
+
+const grypeCounts = countSeverity(data.grype.results);
+createDonut('grypeDonut', grypeCounts);
+</pre>
+
+<!-- ───────────────────────────────────────────────
+     4. KEV 목록 테이블
+─────────────────────────────────────────────── -->
+<h2>4. KEV 등재 취약점 테이블</h2>
+<div id="kevTable"></div>
+
+<pre>
+// CISA KEV(Known Exploited Vulnerabilities) 등재 항목만 필터
+function renderKevTable(grypeResults, containerId) {
+  const kev = grypeResults
+    .filter(v => v.kev_included)
+    .sort((a, b) => (b.epss_score || 0) - (a.epss_score || 0));  // EPSS 높은 순
+
+  if (!kev.length) {
+    document.getElementById(containerId).innerHTML = '&lt;p&gt;KEV 등재 취약점 없음&lt;/p&gt;';
+    return;
+  }
+
+  const rows = kev.map(v => `
+    &lt;tr&gt;
+      &lt;td&gt;&lt;span class="kev-badge"&gt;KEV&lt;/span&gt; ${v.vulnerability_id}&lt;/td&gt;
+      &lt;td&gt;${v.pkg_name} ${v.installed_version}&lt;/td&gt;
+      &lt;td class="sev-${v.severity.toLowerCase()}"&gt;${v.severity}&lt;/td&gt;
+      &lt;td&gt;${v.epss_score ? (v.epss_score * 100).toFixed(1) + '%' : '-'}&lt;/td&gt;
+      &lt;td&gt;${v.fix_versions || '패치 없음'}&lt;/td&gt;
+    &lt;/tr&gt;
+  `).join('');
+
+  document.getElementById(containerId).innerHTML = `
+    &lt;table&gt;
+      &lt;thead&gt;
+        &lt;tr&gt;&lt;th&gt;CVE&lt;/th&gt;&lt;th&gt;패키지&lt;/th&gt;&lt;th&gt;심각도&lt;/th&gt;&lt;th&gt;EPSS&lt;/th&gt;&lt;th&gt;수정 버전&lt;/th&gt;&lt;/tr&gt;
+      &lt;/thead&gt;
+      &lt;tbody&gt;${rows}&lt;/tbody&gt;
+    &lt;/table&gt;
+  `;
+}
+</pre>
+
+<!-- ───────────────────────────────────────────────
+     5. Top 위험 패키지 테이블 (EPSS 기준)
+─────────────────────────────────────────────── -->
+<h2>5. Top 10 위험 취약점 (EPSS 높은 순)</h2>
+<div id="topRisks"></div>
+
+<pre>
+function renderTopRisks(grypeResults, containerId, limit = 10) {
+  const top = [...grypeResults]
+    .sort((a, b) => (b.epss_score || 0) - (a.epss_score || 0))
+    .slice(0, limit);
+
+  const rows = top.map((v, i) => `
+    &lt;tr&gt;
+      &lt;td&gt;${i + 1}&lt;/td&gt;
+      &lt;td&gt;${v.vulnerability_id}&lt;/td&gt;
+      &lt;td&gt;${v.pkg_name}&lt;/td&gt;
+      &lt;td class="sev-${v.severity.toLowerCase()}"&gt;${v.severity}&lt;/td&gt;
+      &lt;td&gt;${v.epss_score ? (v.epss_score * 100).toFixed(2) + '%' : '-'}&lt;/td&gt;
+      &lt;td&gt;${v.risk_score ?? '-'}&lt;/td&gt;
+      &lt;td&gt;${v.kev_included ? '&lt;span class="kev-badge"&gt;KEV&lt;/span&gt;' : ''}&lt;/td&gt;
+    &lt;/tr&gt;
+  `).join('');
+
+  document.getElementById(containerId).innerHTML = `
+    &lt;table&gt;
+      &lt;thead&gt;
+        &lt;tr&gt;&lt;th&gt;#&lt;/th&gt;&lt;th&gt;CVE&lt;/th&gt;&lt;th&gt;패키지&lt;/th&gt;&lt;th&gt;심각도&lt;/th&gt;
+            &lt;th&gt;EPSS&lt;/th&gt;&lt;th&gt;위험도&lt;/th&gt;&lt;th&gt;KEV&lt;/th&gt;&lt;/tr&gt;
+      &lt;/thead&gt;
+      &lt;tbody&gt;${rows}&lt;/tbody&gt;
+    &lt;/table&gt;
+  `;
+}
+</pre>
+
+<!-- ───────────────────────────────────────────────
+     6. 시크릿 탐지 목록
+─────────────────────────────────────────────── -->
+<h2>6. 시크릿 탐지 목록</h2>
+<pre>
+function renderSecrets(securityList, containerId) {
+  if (!securityList.length) {
+    document.getElementById(containerId).innerHTML = '&lt;p&gt;시크릿 탐지 없음 ✅&lt;/p&gt;';
+    return;
+  }
+
+  const rows = securityList.map(s => `
+    &lt;tr&gt;
+      &lt;td class="sev-${s.severity.toLowerCase()}"&gt;${s.severity}&lt;/td&gt;
+      &lt;td&gt;${s.rule_id}&lt;/td&gt;
+      &lt;td&gt;${s.category || '-'}&lt;/td&gt;
+      &lt;td&gt;${s.target}&lt;/td&gt;
+      &lt;td&gt;${s.match_masked || '-'}&lt;/td&gt;
+    &lt;/tr&gt;
+  `).join('');
+
+  document.getElementById(containerId).innerHTML = `
+    &lt;table&gt;
+      &lt;thead&gt;
+        &lt;tr&gt;&lt;th&gt;심각도&lt;/th&gt;&lt;th&gt;Rule ID&lt;/th&gt;&lt;th&gt;유형&lt;/th&gt;&lt;th&gt;파일&lt;/th&gt;&lt;th&gt;탐지 내용&lt;/th&gt;&lt;/tr&gt;
+      &lt;/thead&gt;
+      &lt;tbody&gt;${rows}&lt;/tbody&gt;
+    &lt;/table&gt;
+  `;
+}
+</pre>
+
+<!-- ───────────────────────────────────────────────
+     7. 전체 통합 예시
+─────────────────────────────────────────────── -->
+<h2>7. 전체 통합 — 스캔 후 모든 차트 한 번에 렌더링</h2>
+<pre>
+const API = 'http://localhost:3000';
+
+async function runFullScan(file) {
+  // 1) 업로드
+  const form = new FormData();
+  form.append('image', file);
+  const { jobId } = await fetch(`${API}/upload`, { method: 'POST', body: form }).then(r => r.json());
+
+  // 2) 스캔 요청
+  await fetch(`${API}/scan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jobId, tool: 'both' }),
+  });
+
+  // 3) 완료까지 폴링
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(async () => {
+      const data = await fetch(`${API}/scan/${jobId}`).then(r => r.json());
+      if (data.status === 'done') { clearInterval(timer); resolve(data); }
+      if (data.status === 'failed') { clearInterval(timer); reject(data); }
+    }, 2000);
+  });
+}
+
+// ── 사용 예 (파일 input 이벤트에서) ──────────────────────
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const data = await runFullScan(file);
+
+  // 차트 렌더링
+  createDonut('trivyDonut', countSeverity(data.trivy.results));
+  createDonut('grypeDonut', countSeverity(data.grype.results));
+  renderKevTable(data.grype.results, 'kevTable');
+  renderTopRisks(data.grype.results, 'topRisks');
+  renderSecrets(data.filtered.security, 'secretList');
+});
+</pre>
+
+<!-- ── 데모 차트 렌더링 (더미 데이터) ── -->
+<script>
+const dummyData = {
+  trivy: { results: [
+    ...Array(12).fill({ severity: 'CRITICAL' }),
+    ...Array(23).fill({ severity: 'HIGH' }),
+    ...Array(41).fill({ severity: 'MEDIUM' }),
+    ...Array(8).fill({ severity: 'LOW' }),
+    ...Array(3).fill({ severity: 'UNKNOWN' }),
+  ]},
+  grype: { results: [
+    ...Array(5).fill({ severity: 'Critical', epss_score: 0.95, kev_included: true, vulnerability_id: 'CVE-2024-0001', pkg_name: 'openssl', installed_version: '3.0.0', fix_versions: '3.0.2', risk_score: 9.1 }),
+    ...Array(15).fill({ severity: 'High', epss_score: 0.45, kev_included: false, vulnerability_id: 'CVE-2024-0002', pkg_name: 'nginx', installed_version: '1.18.0', fix_versions: '1.20.0', risk_score: 6.5 }),
+    ...Array(30).fill({ severity: 'Medium', epss_score: 0.12, kev_included: false, vulnerability_id: 'CVE-2024-0003', pkg_name: 'curl', installed_version: '7.68.0', fix_versions: null, risk_score: 3.2 }),
+  ]},
+};
+
+function countSeverity(results) {
+  const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+  results.forEach(v => {
+    const sev = (v.severity || 'UNKNOWN').toUpperCase();
+    const key = counts.hasOwnProperty(sev) ? sev : 'UNKNOWN';
+    counts[key]++;
+  });
+  return counts;
+}
+
+function createDonut(canvasId, counts) {
+  const colors = { CRITICAL:'#dc2626', HIGH:'#ea580c', MEDIUM:'#ca8a04', LOW:'#16a34a', UNKNOWN:'#6b7280' };
+  new Chart(document.getElementById(canvasId), {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(counts),
+      datasets: [{ data: Object.values(counts), backgroundColor: Object.keys(counts).map(k => colors[k]), borderWidth: 2 }],
+    },
+    options: { cutout: '65%', plugins: { legend: { position: 'right' } } },
+  });
+}
+
+createDonut('trivyDonut', countSeverity(dummyData.trivy.results));
+createDonut('grypeDonut', countSeverity(dummyData.grype.results));
+
+// KEV 테이블 (더미)
+const kevHtml = dummyData.grype.results.filter(v => v.kev_included).slice(0, 3).map(v => `
+  <tr>
+    <td><span class="kev-badge">KEV</span> ${v.vulnerability_id}</td>
+    <td>${v.pkg_name} ${v.installed_version}</td>
+    <td class="sev-critical">${v.severity}</td>
+    <td>${(v.epss_score * 100).toFixed(1)}%</td>
+    <td>${v.fix_versions || '패치 없음'}</td>
+  </tr>`).join('');
+document.getElementById('kevTable').innerHTML = `<table><thead><tr><th>CVE</th><th>패키지</th><th>심각도</th><th>EPSS</th><th>수정 버전</th></tr></thead><tbody>${kevHtml}</tbody></table>`;
+
+// Top Risks (더미)
+const topHtml = dummyData.grype.results.slice(0, 5).map((v, i) => `
+  <tr>
+    <td>${i+1}</td><td>${v.vulnerability_id}</td><td>${v.pkg_name}</td>
+    <td class="sev-${v.severity.toLowerCase()}">${v.severity}</td>
+    <td>${(v.epss_score*100).toFixed(2)}%</td>
+    <td>${v.risk_score}</td>
+    <td>${v.kev_included ? '<span class="kev-badge">KEV</span>' : ''}</td>
+  </tr>`).join('');
+document.getElementById('topRisks').innerHTML = `<table><thead><tr><th>#</th><th>CVE</th><th>패키지</th><th>심각도</th><th>EPSS</th><th>위험도</th><th>KEV</th></tr></thead><tbody>${topHtml}</tbody></table>`;
+</script>
+
+</body>
+</html>

@@ -1,0 +1,74 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DSP — Docker 이미지 취약점 분석</title>
+  <script type="module" crossorigin src="/assets/main-IRnlGX5Z.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/api-DQd6X7ol.js">
+  <link rel="stylesheet" crossorigin href="/assets/api-DN0PSIwl.css">
+</head>
+<body class="page-upload">
+
+  <header class="header">
+    <div class="header-inner">
+      <span class="logo">🐋 DSP</span>
+      <span class="header-sub">Docker Image Vulnerability Scanner</span>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- 업로드 카드 -->
+    <section class="card upload-card">
+      <h2 class="card-title">이미지 스캔</h2>
+      <p class="card-desc">Docker <code>.tar</code> 파일을 업로드하고 취약점을 분석합니다.</p>
+
+      <!-- 드래그&드롭 영역 -->
+      <div id="dropZone" class="drop-zone">
+        <div class="drop-icon">📦</div>
+        <p>파일을 여기에 끌어다 놓거나</p>
+        <label for="fileInput" class="btn btn-secondary">파일 선택</label>
+        <input type="file" id="fileInput" accept=".tar,.tar.gz,.tgz" hidden>
+        <p id="fileName" class="file-name"></p>
+      </div>
+
+      <!-- 도구 선택 -->
+      <div class="tool-select">
+        <span class="tool-label">스캔 도구</span>
+        <label class="tool-option">
+          <input type="radio" name="tool" value="trivy"> Trivy
+        </label>
+        <label class="tool-option">
+          <input type="radio" name="tool" value="grype"> Grype
+        </label>
+        <label class="tool-option">
+          <input type="radio" name="tool" value="both" checked> Both (권장)
+        </label>
+      </div>
+
+      <!-- 스캔 버튼 -->
+      <button id="scanBtn" class="btn btn-primary" disabled>스캔 시작</button>
+
+      <!-- 진행 상황 -->
+      <div id="progressBox" class="progress-box hidden">
+        <div class="spinner"></div>
+        <p id="progressMsg">업로드 중...</p>
+      </div>
+
+      <!-- 에러 -->
+      <p id="errorMsg" class="error-msg hidden"></p>
+    </section>
+
+    <!-- 최근 스캔 목록 -->
+    <section class="card history-card">
+      <h2 class="card-title">최근 스캔</h2>
+      <div id="historyList" class="history-list">
+        <p class="empty-msg">스캔 기록이 없습니다.</p>
+      </div>
+    </section>
+
+  </main>
+
+</body>
+</html>

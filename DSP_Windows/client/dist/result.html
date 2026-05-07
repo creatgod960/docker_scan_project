@@ -1,0 +1,156 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DSP — 스캔 결과</title>
+  <script type="module" crossorigin src="/assets/result-CMOu_ts-.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/api-DQd6X7ol.js">
+  <link rel="stylesheet" crossorigin href="/assets/api-DN0PSIwl.css">
+</head>
+<body class="page-result">
+
+  <header class="header">
+    <div class="header-inner">
+      <a href="/" class="logo">🐋 DSP</a>
+      <span id="scanStatus" class="scan-status"></span>
+    </div>
+  </header>
+
+  <!-- 로딩 -->
+  <div id="loadingBox" class="loading-box">
+    <div class="spinner spinner-lg"></div>
+    <p id="loadingMsg">스캔 결과를 불러오는 중...</p>
+  </div>
+
+  <!-- 결과 메인 -->
+  <main id="resultMain" class="main hidden">
+
+    <!-- 요약 배너 -->
+    <section class="summary-banner">
+      <div class="summary-item">
+        <span class="summary-label">이미지</span>
+        <span id="summaryImage" class="summary-value">—</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">도구</span>
+        <span id="summaryTool" class="summary-value">—</span>
+      </div>
+      <div class="summary-item critical">
+        <span class="summary-label">CRITICAL</span>
+        <span id="sumCritical" class="summary-value">0</span>
+      </div>
+      <div class="summary-item high">
+        <span class="summary-label">HIGH</span>
+        <span id="sumHigh" class="summary-value">0</span>
+      </div>
+      <div class="summary-item medium">
+        <span class="summary-label">MEDIUM</span>
+        <span id="sumMedium" class="summary-value">0</span>
+      </div>
+      <div class="summary-item low">
+        <span class="summary-label">LOW</span>
+        <span id="sumLow" class="summary-value">0</span>
+      </div>
+      <div class="summary-item kev">
+        <span class="summary-label">KEV</span>
+        <span id="sumKev" class="summary-value">0</span>
+      </div>
+      <div class="summary-item secret">
+        <span class="summary-label">시크릿</span>
+        <span id="sumSecret" class="summary-value">0</span>
+      </div>
+    </section>
+
+    <!-- 파일 다운로드 -->
+    <section class="file-download-bar">
+      <div id="fileDownloadBox"></div>
+    </section>
+
+    <!-- 도넛 그래프 -->
+    <section class="card charts-section">
+      <div class="chart-block">
+        <h3>Trivy 취약점</h3>
+        <canvas id="trivyDonut"></canvas>
+      </div>
+      <div class="chart-block">
+        <h3>Grype 취약점</h3>
+        <canvas id="grypeDonut"></canvas>
+      </div>
+    </section>
+
+    <!-- 탭 -->
+    <section class="card tabs-section">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="kev">🔴 KEV 등재</button>
+        <button class="tab-btn" data-tab="topRisks">⚠️ Top 위험</button>
+        <button class="tab-btn" data-tab="appVulns">📦 라이브러리</button>
+        <button class="tab-btn" data-tab="osVulns">🖥️ OS 취약점</button>
+        <button class="tab-btn" data-tab="secrets">🔑 시크릿</button>
+        <button class="tab-btn" data-tab="crossAnalysis">🔀 교차 분석</button>
+        <button class="tab-btn" data-tab="logs">📋 로그</button>
+      </div>
+
+      <!-- KEV 등재 취약점 -->
+      <div id="tab-kev" class="tab-panel">
+        <p class="tab-desc">CISA KEV(Known Exploited Vulnerabilities)에 등재된 취약점입니다. 즉시 패치가 필요합니다.</p>
+        <div id="kevTable"></div>
+      </div>
+
+      <!-- Top 위험 (EPSS 순) -->
+      <div id="tab-topRisks" class="tab-panel hidden">
+        <p class="tab-desc">EPSS 점수(30일 내 실제 악용 확률) 기준 상위 10개 취약점입니다.</p>
+        <div id="topRisksTable"></div>
+      </div>
+
+      <!-- 라이브러리 취약점 (Trivy application_filtered) -->
+      <div id="tab-appVulns" class="tab-panel hidden">
+        <p class="tab-desc">npm, pip, gem 등 언어 패키지에서 발견된 취약점입니다.</p>
+        <div id="appVulnsTable"></div>
+      </div>
+
+      <!-- OS 취약점 (Grype grype_filtered) -->
+      <div id="tab-osVulns" class="tab-panel hidden">
+        <p class="tab-desc">deb, rpm, apk 등 OS 패키지에서 발견된 취약점입니다.</p>
+        <div id="osVulnsTable"></div>
+      </div>
+
+      <!-- 시크릿 탐지 -->
+      <div id="tab-secrets" class="tab-panel hidden">
+        <p class="tab-desc">이미지 레이어에서 발견된 API 키, 비밀번호, 인증서 등입니다.</p>
+        <div id="secretsTable"></div>
+      </div>
+
+      <!-- 교차 분석 (Python scanner) -->
+      <div id="tab-crossAnalysis" class="tab-panel hidden">
+        <p class="tab-desc">
+          Grype와 Trivy 결과를 교차 비교합니다.
+          한 도구만 탐지한 취약점과 심각도가 다르게 평가된 취약점을 확인할 수 있습니다.
+        </p>
+        <!-- 요약 카드 -->
+        <div id="crossSummary" class="cross-summary"></div>
+        <!-- 서브 탭 -->
+        <div class="cross-tab-bar">
+          <button class="cross-tab-btn active" data-cross="grypeOnly">Grype Only</button>
+          <button class="cross-tab-btn" data-cross="trivyOnly">Trivy Only</button>
+          <button class="cross-tab-btn" data-cross="mismatch">심각도 불일치</button>
+        </div>
+        <div id="cross-grypeOnly"  class="cross-panel"></div>
+        <div id="cross-trivyOnly"  class="cross-panel hidden"></div>
+        <div id="cross-mismatch"   class="cross-panel hidden"></div>
+        <p id="crossNone" class="empty-msg hidden">
+          Python 스캐너가 연결되지 않았거나 아직 교차 분석이 완료되지 않았습니다.<br>
+          <code>uvicorn python.scanner:app --port 8000</code> 실행 후 재스캔하세요.
+        </p>
+      </div>
+
+      <!-- 분석 로그 -->
+      <div id="tab-logs" class="tab-panel hidden">
+        <div id="logList" class="log-list"></div>
+      </div>
+    </section>
+
+  </main>
+
+</body>
+</html>
